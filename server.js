@@ -11,9 +11,12 @@ const rateLimit = require('express-rate-limit');
 
 const app = express();
 const ROOT = __dirname;
-const DATA_DIR = path.join(ROOT, 'data');
+const STORAGE_ROOT = process.env.VERCEL ? path.join('/tmp', 'quick-google-review') : ROOT;
+const DATA_DIR = path.join(STORAGE_ROOT, 'data');
 const CONFIG_FILE = path.join(DATA_DIR, 'config.json');
-const UPLOAD_DIR = path.join(ROOT, 'public', 'uploads');
+const UPLOAD_DIR = process.env.VERCEL
+  ? path.join(STORAGE_ROOT, 'uploads')
+  : path.join(ROOT, 'public', 'uploads');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -73,6 +76,7 @@ app.use(session({
   name: 'qgr.sid', secret: effectiveSessionSecret, resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'strict', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 }
 }));
+app.use('/uploads', express.static(UPLOAD_DIR));
 app.use(express.static(path.join(ROOT, 'public'), { extensions: ['html'] }));
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: 'draft-7', legacyHeaders: false });
