@@ -21,12 +21,15 @@ const PORT = Number(process.env.PORT || 3000);
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
-  console.error('SESSION_SECRET is required and must be at least 32 characters.'); process.exit(1);
+const hasValidSessionSecret = Boolean(SESSION_SECRET && SESSION_SECRET.length >= 32);
+const hasValidAdminPassword = Boolean(ADMIN_PASSWORD && ADMIN_PASSWORD.length >= 12);
+if (!hasValidSessionSecret) {
+  console.warn('SESSION_SECRET is missing or too short; sessions will not survive a process restart.');
 }
-if (!ADMIN_PASSWORD || ADMIN_PASSWORD.length < 12) {
-  console.error('ADMIN_PASSWORD is required and must be at least 12 characters.'); process.exit(1);
+if (!hasValidAdminPassword) {
+  console.warn('ADMIN_PASSWORD is missing or too short; admin sign-in is disabled until it is configured.');
 }
+const effectiveSessionSecret = hasValidSessionSecret ? SESSION_SECRET : crypto.randomBytes(32).toString('hex');
 
 const defaults = {
   businessName: 'Your Business',
@@ -67,7 +70,7 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
 } } }));
 app.use(express.json({ limit: '30kb' }));
 app.use(session({
-  name: 'qgr.sid', secret: SESSION_SECRET, resave: false, saveUninitialized: false,
+  name: 'qgr.sid', secret: effectiveSessionSecret, resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, sameSite: 'strict', secure: process.env.NODE_ENV === 'production', maxAge: 8 * 60 * 60 * 1000 }
 }));
 app.use(express.static(path.join(ROOT, 'public'), { extensions: ['html'] }));
@@ -101,6 +104,9 @@ app.get('/api/google-review-link', (_req, res) => {
   res.json({ url });
 });
 app.post('/api/admin/login', loginLimiter, async (req, res) => {
+  if (!hasValidAdminPassword) {
+    return res.status(503).json({ error: 'Admin sign-in is unavailable until ADMIN_PASSWORD is configured.' });
+  }
   const password = String(req.body?.password || '');
   // Compare against a bcrypt hash derived at process start to avoid storing a plaintext password.
   if (!(await bcrypt.compare(password, ADMIN_HASH))) return res.status(401).json({ error: 'Incorrect password. Please try again.' });
@@ -158,7 +164,7 @@ app.get('/api/admin/qr-link', requireAdmin, (req, res) => {
   res.json({ url: `${base}/`, qrUrl: `${base}/qr.png` });
 });
 
-const ADMIN_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 12);
+const ADMIN_HASH = hasValidAdminPassword ? bcrypt.hashSync(ADMIN_PASSWORD, 12) : null;
 app.use((err, _req, res, _next) => {
   const message = err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
     ? 'Logo must be 2 MB or smaller.' : (err.message || 'Something went wrong.');
